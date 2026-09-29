@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+python-multipart
+pydantic-settings
+sqlalchemy
+psycopg[binary]
+httpx
+sarvamai
+langchain-core
+boto3          # only used when STORAGE=s3
+pytest

@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Consultation Recorder</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
+  .row { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; margin-bottom: 1rem; }
+  button { padding: .5rem 1rem; font-size: 1rem; }
+  #rec { background: #c33; color: #fff; border: 0; border-radius: 4px; }
+  #rec.on { background: #333; }
+  .card { border: 1px solid #ccc; border-radius: 6px; padding: .75rem; margin-bottom: .75rem; }
+  .card small { color: #666; }
+  #status { color: #666; }
+  details { border: 1px solid #ccc; border-radius: 6px; padding: .5rem .75rem; margin-bottom: .5rem; }
+  summary { cursor: pointer; font-weight: 600; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: .5rem; margin-top: .5rem; }
+  .grid label { display: flex; flex-direction: column; font-size: .85rem; color: #444; }
+  .grid label.full { grid-column: 1 / -1; }
+  .grid label.chk { flex-direction: row; align-items: center; gap: .4rem; }
+  .flag { color: #c33; font-weight: 600; }
+  .grid label.flag:has(:checked) { background: #fdd; border-radius: 4px; }
+  #jihva_photo { font-size: .85rem; margin-top: .5rem; }
+  .ask { background: #f4f1e8; border-left: 3px solid #b8a25a; padding: .5rem .75rem; margin: .5rem 0; font-style: italic; }
+  .opts { display: flex; flex-direction: column; gap: .2rem; }
+  .opts label { flex-direction: row; align-items: baseline; gap: .4rem; }
+  .opts small { color: #888; }
+</style>
+</head>
+<body>
+<h2>Consultation Recorder</h2>
+<div class="row">
+  <label>Consultation # <input id="cid" type="number" min="1" style="width:5rem"></label>
+  <button id="newc">New consultation</button>
+</div>
+<div class="row">
+  <select id="lang"><option value="auto">Auto-detect</option><option value="hi">Hindi</option><option value="mr">Marathi</option><option value="en">English</option></select>
+  <button id="rec">● Record</button>
+  <span id="status"></span>
+</div>
+<div id="out"></div>
+
+<h3>Ashtavidha Pariksha</h3>
+<form id="exam"></form>
+<div class="row">
+  <label>Examiner <input id="examiner" placeholder="dr.name"></label>
+  <button id="save">Save examination</button>
+  <span id="exam_status"></span>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let rec, chunks = [], timer;
+
+$('newc').onclick = async () => {
+  const r = await fetch('/consultations', { method: 'POST' });
+  $('cid').value = (await r.json()).id;
+  $('out').innerHTML = '';
+  $('exam').reset();
+};
+$('cid').onchange = loadExam;
+
+// ---- Ashtavidha Pariksha form, rendered from /pariksha/schema ----
+const humanize = k => k.replace(/_/g, ' ');
+const control = (name, type) => {
+  if (type === 'int') return `<input type="number" name="${name}" min="0">`;
+  if (type === 'bool') return `<input type="checkbox" name="${name}">`;
+  if (type === 'text') return name.endsWith('.notes') || name.endsWith('.lab_report')
+    ? `<textarea name="${name}" rows="2"></textarea>` : `<input name="${name}">`;
+  if (type.one) return `<div class="opts">${Object.entries(type.one).map(([v, d]) =>
+    `<label><input type="radio" name="${name}" value="${v}"> ${v}${d ? ` <small>— ${d}</small>` : ''}</label>`).join('')}</div>`;
+  if (type.multi) return `<div class="opts">${type.multi.map(v =>
+    `<label><input type="checkbox" name="${name}[]" value="${v}"> ${v}</label>`).join('')}</div>`;
+  return `<select name="${name}"><option value=""></option>${type.map(o => `<option>${o}</option>`).join('')}</select>`;
+};
+(async () => {
+  const schema = await (await fetch('/pariksha/schema')).json();
+  let group = '';
+  $('exam').innerHTML = Object.entries(schema).map(([sec, { label, question, fields }]) => `
+    ${group !== (group = schema[sec].group) && group === 'assessment' ? '<h3>Doctor-led assessments</h3>' : ''}
+    <details${group === 'assessment' ? ' open' : ''}><summary>${label}</summary>
+    ${question ? `<div class="ask">Ask the patient: “${question}”</div>` : ''}<div class="grid">
+      ${Object.entries(fields).map(([f, type]) => {
+        const name = `${sec}.${f}`, cls = [type === 'bool' ? 'chk' : '', f.endsWith('_flag') ? 'flag' : '',
+                                              (type === 'text' && f !== 'photo_url') || type.one || type.multi ? 'full' : ''].join(' ');
+        if (f === 'photo_url') return `<label class="full">tongue photo <input name="${name}" readonly>
+          <div id="jihva_photo"><input type="file" id="photo_file" accept="image/*">
+          <label class="chk"><input type="checkbox" id="photo_consent"> patient consented to photo</label>
+          <button type="button" id="photo_up">Upload photo</button></div></label>`;
+        return `<label class="${cls}">${humanize(f)}${f.endsWith('_flag') ? ' (referral)' : ''} ${control(name, type)}</label>`;
+      }).join('')}
+    </div></details>`).join('');
+  $('photo_up').onclick = uploadPhoto;
+  // in a multi group, "none" is exclusive with the other options
+  $('exam').addEventListener('change', e => {
+    if (!e.target.name?.endsWith('[]') || !e.target.checked) return;
+    for (const o of $('exam').querySelectorAll(`[name="${e.target.name}"]`))
+      if (o !== e.target && (o.value === 'none') !== (e.target.value === 'none')) o.checked = false;
+  });
+})();
+
+async function loadExam() {
+  $('exam').reset();
+  if (!$('cid').value) return;
+  const r = await fetch(`/consultations/${$('cid').value}/examination`);
+  if (!r.ok) { $('exam_status').textContent = 'Consultation not found'; return; }
+  const e = await r.json();
+  $('examiner').value = e.examiner || '';
+  for (const [sec, fields] of Object.entries(e.findings || {}))
+    for (const [f, v] of Object.entries(fields)) {
+      if (Array.isArray(v)) { for (const o of $('exam').querySelectorAll(`[name="${sec}.${f}[]"]`)) o.checked = v.includes(o.value); continue; }
+      const el = $('exam').elements[`${sec}.${f}`];
+      if (!el) continue;
+      if (el instanceof RadioNodeList || el.type === 'radio') el.value = v;       // radio group
+      else el.type === 'checkbox' ? el.checked = !!v : el.value = v;
+    }
+  $('exam_status').textContent = e.recorded_at ? `loaded (${e.recorded_at})` : '';
+}
+
+$('save').onclick = async () => {
+  if (!$('cid').value) { $('exam_status').textContent = 'Create or enter a consultation first'; return; }
+  const findings = {};
+  for (const el of $('exam').elements) {
+    if (!el.name) continue;
+    const [sec, f] = el.name.replace(/\[\]$/, '').split('.');
+    if (el.name.endsWith('[]')) { if (el.checked) ((findings[sec] ??= {})[f] ??= []).push(el.value); continue; }
+    if (el.type === 'radio' && !el.checked) continue;
+    const v = el.type === 'checkbox' ? el.checked : el.type === 'number' ? el.valueAsNumber : el.value;
+    if (v === '' || v === false || Number.isNaN(v)) continue;
+    (findings[sec] ??= {})[f] = v;
+  }
+  const r = await fetch(`/consultations/${$('cid').value}/examination`, {
+    method: 'PUT', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ examiner: $('examiner').value || 'unknown', findings }) });
+  const j = await r.json();
+  $('exam_status').textContent = r.ok ? `saved #${j.id}` : 'Error: ' + (j.detail || r.status);
+};
+
+async function uploadPhoto() {
+  if (!$('cid').value || !$('photo_file').files[0]) { $('exam_status').textContent = 'Pick a consultation and a photo'; return; }
+  const fd = new FormData();
+  fd.append('file', $('photo_file').files[0]);
+  fd.append('consent', $('photo_consent').checked);
+  const r = await fetch(`/consultations/${$('cid').value}/examination/jihva-photo`, { method: 'POST', body: fd });
+  const j = await r.json();
+  if (!r.ok) { $('exam_status').textContent = 'Error: ' + (j.detail || r.status); return; }
+  $('exam').elements['jihva.photo_url'].value = j.photo_url;
+  $('exam_status').textContent = 'photo uploaded, save examination to keep it';
+}
+
+$('rec').onclick = async () => {
+  if (rec && rec.state === 'recording') { rec.stop(); return; }
+  if (!$('cid').value) { $('status').textContent = 'Create or enter a consultation first'; return; }
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  rec = new MediaRecorder(stream);
+  chunks = [];
+  rec.ondataavailable = e => chunks.push(e.data);
+  rec.onstop = () => { stream.getTracks().forEach(t => t.stop()); clearTimeout(timer); upload(); };
+  rec.start();
+  timer = setTimeout(() => rec.stop(), 30000);   // Sarvam limit
+  $('rec').textContent = '■ Stop'; $('rec').classList.add('on');
+  $('status').textContent = 'Recording… (auto-stops at 30 s)';
+};
+
+async function upload() {
+  $('rec').textContent = '● Record'; $('rec').classList.remove('on');
+  $('status').textContent = 'Transcribing…';
+  const fd = new FormData();
+  fd.append('file', new Blob(chunks, { type: rec.mimeType }), 'clip.webm');
+  fd.append('language', $('lang').value);
+  const r = await fetch(`/consultations/${$('cid').value}/audio`, { method: 'POST', body: fd });
+  const j = await r.json();
+  if (!r.ok) { $('status').textContent = 'Error: ' + (j.detail || r.status); return; }
+  $('status').textContent = '';
+  $('out').insertAdjacentHTML('afterbegin', `
+    <div class="card">
+      <small>${j.language} · transcript #${j.transcript_id}</small>
+      <p>${j.raw_text}</p>
+      ${j.translated_text ? `<p><b>EN:</b> ${j.translated_text}</p>` : ''}
+    </div>`);
+}
+</script>
+</body>
+</html>

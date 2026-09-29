@@ -1,0 +1,6 @@
+# Offline fallback backends (ASR_BACKEND=local / MT_BACKEND=local). Large downloads.
+torch
+torchaudio
+transformers
+faster-whisper
+IndicTransToolkit
