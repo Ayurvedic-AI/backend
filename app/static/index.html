@@ -26,6 +26,9 @@
   .opts { display: flex; flex-direction: column; gap: .2rem; }
   .opts label { flex-direction: row; align-items: baseline; gap: .4rem; }
   .opts small { color: #888; }
+  .alert { background: #fdd; border: 1px solid #c33; color: #900; padding: .5rem .75rem; border-radius: 6px; margin: .5rem 0; }
+  .verse { border-left: 3px solid #b8a25a; padding: .25rem .75rem; margin: .5rem 0; }
+  .verse small { color: #666; }
 </style>
 </head>
 <body>
@@ -46,8 +49,10 @@
 <div class="row">
   <label>Examiner <input id="examiner" placeholder="dr.name"></label>
   <button id="save">Save examination</button>
+  <button id="find">Find verses</button>
   <span id="exam_status"></span>
 </div>
+<div id="verses"></div>
 
 <script>
 const $ = id => document.getElementById(id);
@@ -56,8 +61,21 @@ let rec, chunks = [], timer;
 $('newc').onclick = async () => {
   const r = await fetch('/consultations', { method: 'POST' });
   $('cid').value = (await r.json()).id;
-  $('out').innerHTML = '';
+  $('out').innerHTML = ''; $('verses').innerHTML = '';
   $('exam').reset();
+};
+const alertHtml = j => j.urgent ? `<div class="alert"><b>Red flags:</b> ${j.red_flags.join(', ')}.
+  Assess for urgent medical care before any Ayurvedic interpretation.</div>` : '';
+
+$('find').onclick = async () => {
+  if (!$('cid').value) { $('exam_status').textContent = 'Create or enter a consultation first'; return; }
+  $('verses').innerHTML = '<p id="status">Searching…</p>';
+  const r = await fetch(`/consultations/${$('cid').value}/verses?k=10`);
+  const j = await r.json();
+  if (!r.ok) { $('verses').innerHTML = `<p>Error: ${j.detail || r.status}</p>`; return; }
+  $('verses').innerHTML = `<h3>Charaka Samhita · matching verses</h3>${alertHtml(j)}
+    <p><small>Searched: ${j.queries.join(' · ')}</small></p>
+    ${j.verses.map(v => `<div class="verse"><small>${v.ref} · matched ${v.matched.join(', ')}</small><p>${v.text}</p></div>`).join('')}`;
 };
 $('cid').onchange = loadExam;
 
@@ -174,7 +192,7 @@ async function upload() {
   if (!r.ok) { $('status').textContent = 'Error: ' + (j.detail || r.status); return; }
   $('status').textContent = '';
   $('out').insertAdjacentHTML('afterbegin', `
-    <div class="card">
+    <div class="card">${alertHtml(j)}
       <small>${j.language} · transcript #${j.transcript_id}</small>
       <p>${j.raw_text}</p>
       ${j.translated_text ? `<p><b>EN:</b> ${j.translated_text}</p>` : ''}

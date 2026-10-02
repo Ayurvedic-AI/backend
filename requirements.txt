@@ -9,3 +9,5 @@ sarvamai
 langchain-core
 boto3          # only used when STORAGE=s3
 pytest
+pgvector
+sentence-transformers   # pip install with --extra-index-url https://download.pytorch.org/whl/cpu to skip CUDA

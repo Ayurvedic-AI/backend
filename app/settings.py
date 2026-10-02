@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     s3_bucket: str = ""
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/ayurvedic_ai"
 
+    cors_origins: str = "http://localhost:5173"   # comma-separated; the Vite dev server
+
     sarvam_api_key: str = ""
     bhashini_user_id: str = ""
     bhashini_api_key: str = ""
